@@ -3,7 +3,9 @@ This is a very early-stage transpiler for generating Futhark code based on LaTeX
 
 # Dependencies
 sympy
+
 antlr4-python3-runtime
+
 LaTeXML + latexmlmath
 
 # Dependency Installation (Ubuntu/Debian)
