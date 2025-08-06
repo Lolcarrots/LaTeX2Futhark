@@ -139,25 +139,46 @@ def parse_norm_latex(expr: str):
 def parse_any_latex(expr: str):
     import re
     import xml.etree.ElementTree as ET
+
     if expr is None:
         print('parse_any_latex received None input')
         return sympy.Integer(0)
-    original_expr = expr
-    print(f'parse_any_latex called with: {expr}')
+
+    matrix_only = re.fullmatch(
+        r'\s*\\begin\{[pb]?matrix\}.*?\\end\{[pb]?matrix\}\s*',
+        expr,
+        re.DOTALL,
+    )
+    if matrix_only:
+        try:
+            ml = latex_to_mathml(expr)
+            matrix = parse_mathml_matrix(ml)
+            print(f'DEBUG: Parsed whole‑matrix LaTeX → SymPy Matrix:\n{matrix}')
+            return matrix
+        except Exception as e:
+            print(f'DEBUG: Whole‑matrix parsing failed ({e}); falling back')
+
     if '\\nabla' in expr:
         nabla_result = parse_nabla_latex(expr)
         if nabla_result is not None:
             print(f'Parsed nabla expression: {nabla_result}')
             return nabla_result
+
     if '||' in expr and re.match('\\|\\|(.+)\\|\\|(?:_(\\d+))?$', expr.strip()):
         norm_result = parse_norm_latex(expr)
         if norm_result is not None:
             print(f'Parsed norm expression: {norm_result}')
             return norm_result
+
     has_derivatives = bool(re.search('\\\\frac\\{d[\\^]?', expr))
     if has_derivatives:
         print('Expression contains derivatives - will be handled during splitting or by LaTeX parser')
-    func_patterns = ['([A-Z][A-Za-z]*)\\s*\\\\left\\s*\\((.*?\\\\begin\\{[pb]?matrix\\}.*?\\\\end\\{[pb]?matrix\\}.*?)\\s*\\\\right\\s*\\)', '([A-Z][A-Za-z]*)\\s*\\((.*?\\\\begin\\{[pb]?matrix\\}.*?\\\\end\\{[pb]?matrix\\}.*?)\\)', '([A-Z][A-Za-z]*)\\s*(\\\\begin\\{[pb]?matrix\\}.*?\\\\end\\{[pb]?matrix\\})']
+
+    func_patterns = [
+        '([A-Z][A-Za-z]*)\\s*\\\\left\\s*\\((.*?\\\\begin\\{[pb]?matrix\\}.*?\\\\end\\{[pb]?matrix\\}.*?)\\s*\\\\right\\s*\\)',
+        '([A-Z][A-Za-z]*)\\s*\\((.*?\\\\begin\\{[pb]?matrix\\}.*?\\\\end\\{[pb]?matrix\\}.*?)\\)',
+        '([A-Z][A-Za-z]*)\\s*(\\\\begin\\{[pb]?matrix\\}.*?\\\\end\\{[pb]?matrix\\})'
+    ]
     for pattern in func_patterns:
         func_match = re.match(pattern, expr.strip(), re.DOTALL)
         if func_match:
@@ -174,8 +195,14 @@ def parse_any_latex(expr: str):
             except Exception as e:
                 print(f'Failed to parse custom function application: {e}')
                 continue
+
     if '\\frac{' in expr and '^' in expr:
-        expr = re.sub('\\\\frac\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}\\s*\\^(\\{[^}]+\\}|\\w+)', '\\\\frac{\\1}{(\\2)^\\3}', expr)
+        expr = re.sub(
+            '\\\\frac\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}\\s*\\^(\\{[^}]+\\}|\\w+)',
+            '\\\\frac{\\1}{(\\2)^\\3}',
+            expr,
+        )
+
     if expr.strip().startswith('\\det') and '\\begin{pmatrix}' in expr:
         try:
             print('Using improved matrix parsing to create SymPy expression...')
@@ -223,6 +250,7 @@ def parse_any_latex(expr: str):
             print(f'Improved matrix parsing failed: {e}')
             import traceback
             traceback.print_exc()
+
     try:
         from sympy.parsing.latex import parse_latex
         result = parse_latex(expr)
@@ -230,6 +258,7 @@ def parse_any_latex(expr: str):
             return result
     except Exception as e:
         print(f'parse_latex failed: {e}')
+
     processed_expr = expr
     processed_expr = processed_expr.replace('\\arctan', 'atan')
     processed_expr = processed_expr.replace('\\arcsin', 'asin')
@@ -246,7 +275,11 @@ def parse_any_latex(expr: str):
         num = match.group(1)
         den = match.group(2)
         return f'(({num})/({den}))'
-    processed_expr = re.sub('\\\\frac\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}', frac_replacer, processed_expr)
+    processed_expr = re.sub(
+        '\\\\frac\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}',
+        frac_replacer,
+        processed_expr,
+    )
     processed_expr = re.sub('\\\\sqrt\\{([^}]+)\\}', 'sqrt(\\1)', processed_expr)
 
     def sum_replacer(match):
@@ -259,11 +292,25 @@ def parse_any_latex(expr: str):
                 end = end.rstrip('}')
                 return f'Sum({expr_part}, ({var_part.strip()}, {start}, {end}))'
         return match.group(0)
-    processed_expr = re.sub('\\\\sum_\\{([^}]+)\\}\\s*([^+\\-]*?)(?=[\\s+\\-]|$)', sum_replacer, processed_expr)
+    processed_expr = re.sub(
+        '\\\\sum_\\{([^}]+)\\}\\s*([^+\\-]*?)(?=[\\s+\\-]|$)',
+        sum_replacer,
+        processed_expr,
+    )
     processed_expr = re.sub('\\\\[a-zA-Z]+', '', processed_expr)
+
     try:
-        from sympy import sin, cos, tan, log, exp, sqrt, atan, asin, acos, sinh, cosh, tanh, pi, E, I, Symbol, Sum
-        namespace = {'sin': sin, 'cos': cos, 'tan': tan, 'log': log, 'exp': exp, 'sqrt': sqrt, 'atan': atan, 'asin': asin, 'acos': acos, 'arctan': atan, 'arcsin': asin, 'arccos': acos, 'sinh': sinh, 'cosh': cosh, 'tanh': tanh, 'pi': pi, 'e': E, 'E': E, 'I': I, 'Sum': Sum}
+        from sympy import (
+            sin, cos, tan, log, exp, sqrt, atan, asin, acos,
+            sinh, cosh, tanh, pi, E, I, Symbol, Sum,
+        )
+        namespace = {
+            'sin': sin, 'cos': cos, 'tan': tan, 'log': log, 'exp': exp,
+            'sqrt': sqrt, 'atan': atan, 'asin': asin, 'acos': acos,
+            'arctan': atan, 'arcsin': asin, 'arccos': acos,
+            'sinh': sinh, 'cosh': cosh, 'tanh': tanh,
+            'pi': pi, 'e': E, 'E': E, 'I': I, 'Sum': Sum,
+        }
         for match in re.finditer('\\b([a-zA-Z_]\\w*)\\b', processed_expr):
             var_name = match.group(1)
             if var_name not in namespace and (not var_name.isdigit()):
@@ -283,6 +330,7 @@ def parse_any_latex(expr: str):
                 return result
             except Exception as e2:
                 print(f'Mixed notation parsing also failed: {e2}')
+
     try:
         from sympy.parsing.latex import parse_latex
         return parse_latex(original_expr)
@@ -918,8 +966,17 @@ class LaTeX2FutharkTranspiler:
         return f'{base_name}_{i}'
 
     def sympy_matrix_to_futhark(self, matrix) -> str:
-        rows = [f'[{', '.join(map(str, row))}]' for row in matrix.tolist()]
-        return f'[{', '.join(rows)}]'
+        try:
+            rows = []
+            for row in matrix.tolist():
+                elems = [self.sympy_to_futhark(e) for e in row]
+                rows.append(f'[{", ".join(elems)}]')
+            return f'[{", ".join(rows)}]'
+        except Exception as e:
+            print(f'Error in sympy_matrix_to_futhark: {e}')
+            import traceback
+            traceback.print_exc()
+            return '[[0.0]]'
 
     def split_latex_matrix_algebra(self, tex: str):
         blocks = []
@@ -1153,6 +1210,13 @@ class LaTeX2FutharkTranspiler:
         print(f'HANDLE_FUNC: str(expr.func) = {str(expr.func)}')
         print(f'HANDLE_FUNC: expr.args = {expr.args}')
         func_obj = expr.func
+        if str(func_obj) == 'det':
+            if len(expr.args) == 1:
+                arg_str = self.sympy_to_futhark(expr.args[0])
+                return f'det({arg_str})'
+            else:
+                args = [self.sympy_to_futhark(a) for a in expr.args]
+                return f'det({", ".join(args)})'
         if func_obj in self.sympy_futhark_funcs:
             func_name = self.sympy_futhark_funcs[func_obj]
             print(f'HANDLE_FUNC: found in direct lookup: {func_name}')
@@ -1161,11 +1225,22 @@ class LaTeX2FutharkTranspiler:
             func_str = str(func_obj).lower()
             if '.' in func_str:
                 func_str = func_str.split('.')[-1]
-            manual_map = {'sin': 'f64.sin', 'cos': 'f64.cos', 'tan': 'f64.tan', 'log': 'f64.log', 'ln': 'f64.log', 'exp': 'f64.exp', 'sqrt': 'f64.sqrt', 'atan': 'f64.atan', 'asin': 'f64.asin', 'acos': 'f64.acos', 'arctan': 'f64.atan', 'arcsin': 'f64.asin', 'arccos': 'f64.acos', 'abs': 'f64.abs', 'sign': 'f64.sgn', 'ceiling': 'f64.ceil', 'floor': 'f64.floor', 'min': 'f64.min', 'max': 'f64.max'}
+            manual_map = {
+                'sin': 'f64.sin', 'cos': 'f64.cos', 'tan': 'f64.tan',
+                'log': 'f64.log', 'ln': 'f64.log', 'exp': 'f64.exp',
+                'sqrt': 'f64.sqrt', 'atan': 'f64.atan', 'asin': 'f64.asin',
+                'acos': 'f64.acos', 'arctan': 'f64.atan',
+                'arcsin': 'f64.asin', 'arccos': 'f64.acos',
+                'abs': 'f64.abs', 'sign': 'f64.sgn',
+                'ceiling': 'f64.ceil', 'floor': 'f64.floor',
+                'min': 'f64.min', 'max': 'f64.max'
+            }
             func_name = manual_map.get(func_str, f'{func_str}')
+
         args = [self.sympy_to_futhark(a) for a in expr.args]
         func_str_lower = str(func_obj).lower()
-        if (func_obj in (sympy.Min, sympy.Max) or 'min' in func_str_lower or 'max' in func_str_lower) and len(args) >= 2:
+        if (func_obj in (sympy.Min, sympy.Max) or
+            'min' in func_str_lower or 'max' in func_str_lower) and len(args) >= 2:
             if func_obj == sympy.Min or 'min' in func_str_lower:
                 op = 'f64.min'
             else:
@@ -1175,17 +1250,19 @@ class LaTeX2FutharkTranspiler:
                 result = f'{op} {arg} ({result})'
             print(f'HANDLE_FUNC: returning (nested min/max): {result}')
             return result
-        func_str = str(func_obj).lower()
-        if 'log' in func_str and len(args) > 1:
+
+        if 'log' in func_str_lower and len(args) > 1:
             main_arg, base_arg = (args[0], args[1])
             if base_arg in ('f64.e', 'e', '2.718'):
                 return f'f64.log {main_arg}'
             return f'(f64.log {main_arg} / f64.log {base_arg})'
+
         if len(args) == 1:
             result = f'{func_name} {args[0]}'
             print(f'HANDLE_FUNC: returning (single arg): {result}')
             return result
-        result = f'{func_name}({', '.join(args)})'
+
+        result = f'{func_name}({", ".join(args)})'
         print(f'HANDLE_FUNC: returning (multi arg): {result}')
         return result
 
@@ -1342,58 +1419,12 @@ class LaTeX2FutharkTranspiler:
 
     def handle_matrix(self, expr) -> str:
         try:
-            print(f'Matrix type: {type(expr)}')
-            print(f'Matrix repr: {repr(expr)}')
             if hasattr(expr, 'shape') and hasattr(expr, '__getitem__'):
-                rows, cols = expr.shape
-                if cols == 1:
-                    vector_entries = []
-                    for i in range(rows):
-                        try:
-                            entry = expr[i, 0]
-                            entry_str = self.sympy_to_futhark(entry)
-                            vector_entries.append(entry_str)
-                        except Exception as e:
-                            print(f'Error accessing vector element [{i}]: {e}')
-                            vector_entries.append('0.0')
-                    return f'[{', '.join(vector_entries)}]'
-                matrix_entries = []
-                for i in range(rows):
-                    row_entries = []
-                    for j in range(cols):
-                        try:
-                            try:
-                                entry = expr[i, j]
-                            except:
-                                try:
-                                    entry = expr[i][j]
-                                except:
-                                    entry = None
-                            if entry is not None:
-                                entry_str = self.sympy_to_futhark(entry)
-                                row_entries.append(entry_str)
-                            else:
-                                row_entries.append('0.0')
-                        except Exception as e:
-                            print(f'Error accessing matrix element [{i},{j}]: {e}')
-                            row_entries.append('0.0')
-                    matrix_entries.append(f'[{', '.join(row_entries)}]')
-                return f'[{', '.join(matrix_entries)}]'
-            elif hasattr(expr, 'name'):
-                return str(expr.name)
-            elif hasattr(expr, '__len__') and (not hasattr(expr, 'shape')):
-                vector_entries = []
-                for i in range(len(expr)):
-                    try:
-                        entry = expr[i]
-                        entry_str = self.sympy_to_futhark(entry)
-                        vector_entries.append(entry_str)
-                    except Exception as e:
-                        print(f'Error accessing vector element [{i}]: {e}')
-                        vector_entries.append('0.0')
-                return f'[{', '.join(vector_entries)}]'
-            else:
-                return self._omit(expr)
+                return self.sympy_matrix_to_futhark(expr)
+            if hasattr(expr, '__len__') and not hasattr(expr, 'shape'):
+                elems = [self.sympy_to_futhark(e) for e in expr]
+                return f'[{", ".join(elems)}]'
+            return self._omit(expr)
         except Exception as e:
             print(f'Exception in handle_matrix: {e}')
             import traceback
