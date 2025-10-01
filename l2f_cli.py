@@ -405,15 +405,15 @@ class ASTToFutharkTranspiler:
         h_str = repr(float(h))
 
         code = []
-        code.append(f"let h = {h_str} in")
+        code.append(f"let h__ = {h_str} in")
         code.append(f"let f0 = \\{params} -> {expr} in")
         cur = "f0"
         for v in order_list:
             for r in range(orders[v]):
-                call_plus  = ' '.join([f"({w} + h)" if w == v else w for w in order_list])
-                call_minus = ' '.join([f"({w} - h)" if w == v else w for w in order_list])
+                call_plus  = ' '.join([f"({w} + h__)" if w == v else w for w in order_list])
+                call_minus = ' '.join([f"({w} - h__)" if w == v else w for w in order_list])
                 fn = f"f_{v}_{r}"
-                code.append(f"let {fn} = \\{params} -> (({cur} {call_plus}) - ({cur} {call_minus})) / (2.0*h) in")
+                code.append(f"let {fn} = \\{params} -> (({cur} {call_plus}) - ({cur} {call_minus})) / (2.0*h__) in")
                 cur = fn
 
         args_now = ' '.join(order_list)
@@ -443,15 +443,15 @@ class ASTToFutharkTranspiler:
         h_str = repr(float(self.diff_h))
 
 
-        lines = [f"let h = {h_str} in",
+        lines = [f"let h__ = {h_str} in",
                 f"let f0 = \\{params} -> {expr} in"]
         dnames = []
         for v in names:
-            call_plus  = ' '.join([f"({w} + h)" if w == v else w for w in names])
-            call_minus = ' '.join([f"({w} - h)" if w == v else w for w in names])
+            call_plus  = ' '.join([f"({w} + h__)" if w == v else w for w in names])
+            call_minus = ' '.join([f"({w} - h__)" if w == v else w for w in names])
             dv = f"d_{v}"
             lines.append(
-                f"let {dv} = \\{params} -> ((f0 {call_plus}) - (f0 {call_minus})) / (2.0*h) in"
+                f"let {dv} = \\{params} -> ((f0 {call_plus}) - (f0 {call_minus})) / (2.0*h__) in"
             )
             dnames.append(dv)
 
@@ -491,7 +491,7 @@ class ASTToFutharkTranspiler:
         args_now = ' '.join(names)
         h_str    = repr(float(self.diff_h))
 
-        lines = [f"let h = {h_str} in",
+        lines = [f"let h__ = {h_str} in",
                 f"let f0 = \\{params} -> {expr} in"]
 
         cur = "f0"
@@ -500,9 +500,9 @@ class ASTToFutharkTranspiler:
             second_terms = []
             call_0 = args_now
             for v in names:
-                call_plus  = ' '.join([f"({w} + h)" if w == v else w for w in names])
-                call_minus = ' '.join([f"({w} - h)" if w == v else w for w in names])
-                term = f"(({cur} {call_plus}) - 2.0*({cur} {call_0}) + ({cur} {call_minus})) / (h*h)"
+                call_plus  = ' '.join([f"({w} + h__)" if w == v else w for w in names])
+                call_minus = ' '.join([f"({w} - h__)" if w == v else w for w in names])
+                term = f"(({cur} {call_plus}) - 2.0*({cur} {call_0}) + ({cur} {call_minus})) / (h__*h__)"
                 second_terms.append(term)
             body = ' + '.join(second_terms) if second_terms else '0.0'
             fn = f"L_{kk}"
@@ -718,46 +718,46 @@ def generate_futhark_program(ast_node, function_name='compute'):
     if re.search(r"\bdet\b", futhark_expr):
         det_code = r"""
 -- Determinant using Gaussian elimination
-let det [n] (a_in: [n][n]f64): f64 =
+let det [n__] (a_in: [n__][n__]f64): f64 =
   let a0 = copy a_in
-  let (a, sgn) =
-    loop (a, sgn) = (a0, 1.0) for ii < n do
+  let (a__, sgn) =
+    loop (a__, sgn) = (a0, 1.0) for ii < n__ do
       -- pick pivot in column ii from rows ii..n-1
       let rest =
         map (\off ->
                let jj = ii + 1 + off
-               in (jj, a[jj, ii]))
-            (iota (n - ii - 1))
+               in (jj, a__[jj, ii]))
+            (iota (n__ - ii - 1))
       let choose =
         \(best_idx, best_val) (cand_idx, cand_val) ->
           if f64.abs cand_val > f64.abs best_val
           then (cand_idx, cand_val) else (best_idx, best_val)
-      let (piv_idx, piv_val) = reduce choose (ii, a[ii, ii]) rest
+      let (piv_idx, piv_val) = reduce choose (ii, a__[ii, ii]) rest
       in if f64.abs piv_val < 1e-10 then
            -- singular matrix
-           (a, 0.0)
+           (a__, 0.0)
          else
            -- swap rows if needed
-           let (a, sgn) =
+           let (a__, sgn) =
              if piv_idx != ii then
-               let row_ii = copy a[ii]
-               let row_p  = copy a[piv_idx]
-               let a = a with [ii]      = row_p
-               let a = a with [piv_idx] = row_ii
-               in (a, -sgn)
-             else (a, sgn)
+               let row_ii = copy a__[ii]
+               let row_p  = copy a__[piv_idx]
+               let a__ = a__ with [ii]      = row_p
+               let a__ = a__ with [piv_idx] = row_ii
+               in (a__, -sgn)
+             else (a__, sgn)
            -- eliminate below pivot using a copied pivot row
-           let piv_row = copy a[ii]
+           let piv_row = copy a__[ii]
            let piv     = piv_row[ii]
-           let a =
-             loop a = a for off < n - ii - 1 do
+           let a__ =
+             loop a__ = a__ for off < n__ - ii - 1 do
                let rr    = ii + 1 + off
-               let fac   = a[rr, ii] / piv
-               let new_r = map2 (\x pv -> x - fac * pv) a[rr] piv_row
-               let a     = a with [rr] = new_r
-               in a
-           in (a, sgn)
-  in sgn * reduce (*) 1.0 (map (\kk -> a[kk, kk]) (iota n))
+               let fac   = a__[rr, ii] / piv
+               let new_r = map2 (\x__ pv -> x__ - fac * pv) a__[rr] piv_row
+               let a__     = a__ with [rr] = new_r
+               in a__
+           in (a__, sgn)
+  in sgn * reduce (*) 1.0 (map (\kk -> a__[kk, kk]) (iota n__))
 """
 
     if param_names:
